@@ -1,0 +1,116 @@
+version: "3"
+
+networks:
+  web:
+    external: true
+  internal:
+    external: false
+
+volumes:
+  portainer_data:
+  drone-db:
+
+services:
+
+  mysql:
+    image: mysql:5.7
+    environment:
+      MYSQL_ROOT_PASSWORD:
+    networks:
+      - internal
+    labels:
+      - traefik.enable=false
+
+  p:
+    image: portainer/portainer
+    command: -H unix:///var/run/docker.sock
+    restart: always
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "portainer_data:/data"
+    labels:
+      - "traefik.enable=true"    
+      - "traefik.backend=portainer"
+      - "traefik.frontend.rule=Host:p.YOUR_DOMAIN.com"
+      - "traefik.port=9000"
+    networks:
+      - internal
+      - web
+
+  gitea:
+    image: gitea/gitea:latest
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+      - DB_TYPE=mysql
+
+      - DB_NAME=gitea
+      - DB_USER=root
+      - DB_PASSWD=
+    restart: always
+
+    labels:
+      - "traefik.enable=true"    
+      - "traefik.backend=gitea"
+      - "traefik.frontend.rule=Host:gitea.YOUR_DOMAIN.com"
+      - "traefik.port=3000"
+      
+    networks:
+      - internal
+      - web
+    volumes:
+      - ./gitea:/data
+    ports:
+       - "22:22"
+    depends_on:
+      - mysql
+
+
+  drone:
+    image: drone/drone:latest
+    environment:
+      - DRONE_GITEA_SERVER=https://gitea.YOUR_DOMAIN.com
+      - DRONE_RUNNER_CAPACITY=2
+      - DRONE_SERVER_HOST=drone.YOUR_DOMAIN.com
+      - DRONE_SERVER_PROTO=https
+      - DRONE_GIT_ALWAYS_AUTH=false
+      - DRONE_RPC_SECRET=YOURSECRET
+
+      - DRONE_GITEA_CLIENT_ID=YOUR_GITEA_CLIENT_ID
+      - DRONE_GITEA_CLIENT_SECRET=YOUR_GITEA_SECRET
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data/drone:/data
+    labels:
+      - "traefik.enabled=true"
+      - "traefik.backend=drone"
+      - "traefik.frontend.rule=Host:drone.YOUR_DOMAIN.com"
+      - "traefik.docker.network=web"
+      - "traefik.port=80" 
+    networks:
+      - internal
+      - web
+
+  drone-agent:
+    image: drone/agent:0.8
+    command: agent
+    restart: always
+    depends_on:
+      - drone
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - DRONE_SERVER=drone.YOUR_DOMAIN.com
+      - DRONE_SECRET=YOUR_SECRET
+
+    labels:
+      - "traefik.enabled=true"
+      - "traefik.backend=drone-agent"
+      - "traefik.frontend.rule=Host:drone-agent.YOUR_DOMAIN.com"
+      - "traefik.docker.network=web"
+      - "traefik.port=9000" 
+    networks:
+      - internal
+      - web
+      
